@@ -42,6 +42,7 @@ namespace casadi {
   class SharedObject;
   class SharedObjectInternal;
   class SXNode;
+  class SerializingStream;
   class UniversalNodeOwner {
   public:
     UniversalNodeOwner() = delete;
@@ -64,6 +65,7 @@ namespace casadi {
       \date 2018
   */
   class CASADI_EXPORT DeserializingStream {
+    friend class SerializingStream;
   public:
     /// Constructor
     DeserializingStream(std::istream &in_s);
@@ -138,6 +140,9 @@ namespace casadi {
 
     void version(const std::string& name, int v);
 
+    void connect(SerializingStream & s);
+    void reset();
+
   private:
 
     /* \brief Unpacks a shared object
@@ -151,13 +156,14 @@ namespace casadi {
       switch (i) {
         case 'd': // definition
           e = T::deserialize(*this);
-          nodes.emplace_back(e.get());
+          if (shared_map_) (*shared_map_)[e.get()] = nodes_.size();
+          nodes_.emplace_back(e.get());
           break;
         case 'r': // reference
           {
             casadi_int k;
             unpack("Shared::reference", k);
-            UniversalNodeOwner& t = nodes.at(k);
+            UniversalNodeOwner& t = nodes_.at(k);
             e = T::create(static_cast<M*>(t.get()));
           }
           break;
@@ -173,7 +179,8 @@ namespace casadi {
     void assert_decoration(char e);
 
     /// Collection of all shared pointer deserialized so far
-    std::vector<UniversalNodeOwner> nodes;
+    std::vector<UniversalNodeOwner> nodes_;
+    std::unordered_map<void*, casadi_int>* shared_map_ = nullptr;
     /// Input stream
     std::istream& in;
     /// Debug mode?
@@ -187,6 +194,7 @@ namespace casadi {
       \date 2018
   */
   class CASADI_EXPORT SerializingStream {
+    friend class DeserializingStream;
   public:
     /// Constructor
     SerializingStream(std::ostream& out);
@@ -242,6 +250,10 @@ namespace casadi {
     //@}
 
     void version(const std::string& name, int v);
+
+    void connect(DeserializingStream & s);
+    void reset();
+
   private:
     /** \brief Insert information for a primitive typecheck during deserialization
      *
@@ -262,6 +274,7 @@ namespace casadi {
         e.serialize(*this);
         casadi_int r = shared_map_.size();
         shared_map_[e.get()] = r;
+        if (nodes_) nodes_->emplace_back(e.get());
       } else {
         pack("Shared::flag", 'r'); // reference
         pack("Shared::reference", it->second);
@@ -270,6 +283,7 @@ namespace casadi {
 
     /// Mapping from shared pointers to running counter
     std::unordered_map<void*, casadi_int> shared_map_;
+    std::vector<UniversalNodeOwner>* nodes_ = nullptr;
     /// Output stream
     std::ostream& out;
     /// Debug mode?
